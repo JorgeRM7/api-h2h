@@ -85,3 +85,4 @@ Route::get('/send-invoices-netsuite', function ( NetSuiteRestService $netsuite )
     ]);
 
 });
+
