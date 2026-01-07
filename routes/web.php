@@ -4,12 +4,22 @@ use Illuminate\Support\Facades\Route;
 use App\Services\NetSuiteRestService;
 use App\Models\H2hDocument;
 use GuzzleHttp\Client;
+use App\Jobs\SendInvoiceToNetSuiteJob;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/dispatch-invoice-job/{invoice}', function ($invoice) {
 
+    SendInvoiceToNetSuiteJob::dispatch((int)$invoice);
+
+    return response()->json([
+        'status' => 'success',
+        'message' => "Job disparado para la factura: {$invoice}",
+        'timestamp' => now()->toDateTimeString()
+    ]);
+});
 
 
 Route::get('/send-invoices-netsuite', function ( NetSuiteRestService $netsuite ) {

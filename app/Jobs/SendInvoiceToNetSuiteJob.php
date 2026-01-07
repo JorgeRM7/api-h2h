@@ -2,12 +2,16 @@
 
 namespace App\Jobs;
 
+use App\Models\H2hDocument;
+use App\Services\NetSuiteRestService;
+use GuzzleHttp\Client;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Exception;
 
 class SendInvoiceToNetSuiteJob implements ShouldQueue
 {
@@ -36,15 +40,87 @@ class SendInvoiceToNetSuiteJob implements ShouldQueue
     /**
      * Ejecutar el Job
      */
-    public function handle(): void
+    // public function handle(): void
+    // {
+    //     Log::info("Job SendInvoiceToNetSuiteJob iniciado", [
+    //         'invoice' => $this->invoice
+    //     ]);
+
+
+    //     Log::info("Job SendInvoiceToNetSuiteJob finalizado", [
+    //         'invoice' => $this->invoice
+    //     ]);
+    // }
+
+    public function handle(NetSuiteRestService $netsuite): void
     {
-        Log::info("Job SendInvoiceToNetSuiteJob iniciado", [
-            'invoice' => $this->invoice
-        ]);
+        Log::info("Iniciando envío de factura a NetSuite", ['invoice' => $this->invoice]);
 
+        try {
+            $documentDopu = H2hDocument::where('invoice', $this->invoice)
+                ->where('category_id', 1)
+                ->orderByDesc('id')
+                ->first();
 
-        Log::info("Job SendInvoiceToNetSuiteJob finalizado", [
-            'invoice' => $this->invoice
-        ]);
+            $documentComp = H2hDocument::where('invoice', $this->invoice)
+                ->where('category_id', 5)
+                ->orderByDesc('id')
+                ->first();
+
+            if (!$documentDopu || !$documentComp) {
+                throw new Exception("Documentos incompletos para la factura {$this->invoice} (DOPU o COMP no encontrados)");
+            }
+
+            // 2. Descargar PDF remoto
+            $pdfUrl = "https://servicios-go.com/h2h/download/{$this->invoice}";
+            $client = new Client(['verify' => false, 'timeout' => 60]);
+            $response = $client->get($pdfUrl);
+
+            if ($response->getStatusCode() !== 200) {
+                throw new Exception("No se pudo descargar el PDF para la factura {$this->invoice}");
+            }
+
+            $pdfBase64 = base64_encode($response->getBody()->getContents());
+
+            // 3. Preparar Payload
+            $payload = [
+                'success' => true,
+                'response' => [
+                    'action' => 'Update',
+                    'update_data_register' => [
+                        'ctrl' => ['codigo'  => [], 'estatus' => []],
+                        'content' => '',
+                        'unique_idenfier' => $documentDopu->filename,
+                        'internalid_netsuite' => $documentDopu->netsuite_id,
+                        'prefijo_archivo' => 'COMP',
+                        'filename' => $documentComp->filename,
+                        'srv_data' => '08_TG-0010',
+                        'files' => [
+                            'txt' => null,
+                            'pdf' => $pdfBase64,
+                            'xml' => null,
+                        ],
+                    ],
+                ],
+            ];
+
+            // 4. Enviar a NetSuite
+            $endpoint = config('services.netsuite.script_payment');
+            $netsuiteResponse = $netsuite->request($endpoint, 'POST', $payload);
+
+            Log::info("Envío exitoso a NetSuite", [
+                'invoice' => $this->invoice,
+                'netsuite_response' => $netsuiteResponse
+            ]);
+
+        } catch (Exception $e) {
+            Log::error("Error en SendInvoiceToNetSuiteJob", [
+                'invoice' => $this->invoice,
+                'error' => $e->getMessage()
+            ]);
+
+            // Reintentar el job si es un error de conexión
+            $this->release(10);
+        }
     }
 }
