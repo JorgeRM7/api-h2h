@@ -11,6 +11,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Exception;
 
 class SendInvoiceToNetSuiteJob implements ShouldQueue
@@ -52,9 +53,14 @@ class SendInvoiceToNetSuiteJob implements ShouldQueue
     //     ]);
     // }
 
+    public function middleware(): array
+    {
+        return [new WithoutOverlapping($this->invoice)];
+    }
+
     public function handle(NetSuiteRestService $netsuite): void
     {
-        Log::info("Iniciando envío de factura a NetSuite", ['invoice' => $this->invoice]);
+        Log::channel('netsuite')->info("Iniciando envío de factura", ['invoice' => $this->invoice]);
 
         try {
             $documentDopu = H2hDocument::where('invoice', $this->invoice)
@@ -71,7 +77,6 @@ class SendInvoiceToNetSuiteJob implements ShouldQueue
                 throw new Exception("Documentos incompletos para la factura {$this->invoice} (DOPU o COMP no encontrados)");
             }
 
-            // 2. Descargar PDF remoto
             $pdfUrl = "https://servicios-go.com/h2h/download/{$this->invoice}";
             $client = new Client(['verify' => false, 'timeout' => 60]);
             $response = $client->get($pdfUrl);
@@ -104,23 +109,28 @@ class SendInvoiceToNetSuiteJob implements ShouldQueue
                 ],
             ];
 
-            // 4. Enviar a NetSuite
             $endpoint = config('services.netsuite.script_payment');
             $netsuiteResponse = $netsuite->request($endpoint, 'POST', $payload);
 
-            Log::info("Envío exitoso a NetSuite", [
-                'invoice' => $this->invoice,
-                'netsuite_response' => $netsuiteResponse
-            ]);
+            // Log::info("Envío exitoso a NetSuite", [
+            //     'invoice' => $this->invoice,
+            //     'netsuite_response' => $netsuiteResponse
+            // ]);
+
+            Log::channel('netsuite')->info("Envío exitoso a NetSuite", ['invoice' => $this->invoice, 'netsuite_response' => $netsuiteResponse]);
 
         } catch (Exception $e) {
-            Log::error("Error en SendInvoiceToNetSuiteJob", [
-                'invoice' => $this->invoice,
-                'error' => $e->getMessage()
-            ]);
+            // Log::error("Error en SendInvoiceToNetSuiteJob", [
+            //     'invoice' => $this->invoice,
+            //     'error' => $e->getMessage()
+            // ]);
+
+            Log::channel('netsuite')->info("Error en SendInvoiceToNetSuiteJob", ['invoice' => $this->invoice, 'error' => $e->getMessage()]);
 
             // Reintentar el job si es un error de conexión
-            $this->release(10);
+            if ($this->attempts() < $this->tries) {
+                $this->release(30);
+            }
         }
     }
 }

@@ -127,6 +127,12 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        'netsuite' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/netsuite_transfers.txt'),
+            'level' => 'info',
+        ],
+
     ],
 
 ];
