@@ -3,17 +3,20 @@
 use Illuminate\Support\Facades\Route;
 use App\Services\NetSuiteRestService;
 use App\Models\H2hDocument;
+use GuzzleHttp\Client;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/test-db', function () {
 
-    $invoice = 6761;
-    // $documents = H2hDocument::where('invoice', $invoice)->get();
-    // 
-    $documents = H2hDocument::select([
+
+
+Route::get('/send-invoices-netsuite', function ( NetSuiteRestService $netsuite ) {
+
+    $invoice = 6759;
+
+    $DOCUMENT_DOPU = H2hDocument::select([
         'id',
         'category_id',
         'netsuite_id',
@@ -21,14 +24,33 @@ Route::get('/test-db', function () {
     ])
     ->where('invoice', $invoice)
     ->where('category_id', 1)
-    ->orderBy('id')
-    ->limit(4)
-    ->get();
+    ->orderByDesc('id')
+    ->first();
 
-    $windowsBasePath = '\\\\54.218.15.205\\H2H\\Outbound';
-    $filePath = $windowsBasePath . '\\' . $document->filename;
+    $DOCUMENT_COMP = H2hDocument::select([
+        'id',
+        'category_id',
+        'netsuite_id',
+        'filename'
+    ])
+    ->where('invoice', $invoice)
+    ->where('category_id', 5)
+    ->orderByDesc('id')
+    ->first();
 
-    return response()->json($documents);
+    $pdfUrl = "https://servicios-go.com/h2h/download/{$invoice}";
+
+    $client = new Client([
+        'verify' => false,
+        'timeout' => 60,
+    ]);
+    $response = $client->get($pdfUrl);
+
+    if ($response->getStatusCode() !== 200) {
+        abort(500, 'No se pudo descargar el PDF remoto');
+    }
+    $pdfBase64 = base64_encode($response->getBody()->getContents());
+
 
     $payload = [
         'success' => true,
@@ -40,35 +62,26 @@ Route::get('/test-db', function () {
                     'estatus' => [],
                 ],
                 'content' => '',
-                'unique_idenfier' => $document->invoice,
-                'internalid_netsuite' => $document->netsuite_id,
+                'unique_idenfier' => $DOCUMENT_DOPU->filename,
+                'internalid_netsuite' => $DOCUMENT_DOPU->netsuite_id,
                 'prefijo_archivo' => 'COMP',
-                'filename' => $document->filename,
+                'filename' => $DOCUMENT_COMP->filename,
                 'srv_data' => '08_TG-0010',
                 'files' => [
                     'txt' => null,
-                    'pdf' => $document->filepath ?? '',
+                    'pdf' => $pdfBase64 ?? '',
                     'xml' => null,
                 ],
             ],
         ],
     ];
 
-    return response()->json($payload);
-
-});
-
-Route::get('/netsuite/gastos-full', function (NetSuiteRestService $netsuite) {
-
     $endpoint = config('services.netsuite.script_payment');
+    $netsuiteResponse = $netsuite->request($endpoint, 'POST', $payload);
 
-    $data = [
-        'ubicacion' => 1718,
-        'fechaini'  => '05/06/2024',
-        'fechafin'  => '20/06/2024',
-    ];
+    return response()->json([
+        // 'sent_payload' => $payload,
+        'netsuite_response' => $netsuiteResponse,
+    ]);
 
-    // $response = $netsuite->request($endpoint, 'POST', $data);
-
-    // return response()->json($response);
 });
