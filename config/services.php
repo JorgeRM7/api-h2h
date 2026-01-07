@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    'netsuite' => [
+        'account'         => env('NETSUITE_ACCOUNT'),
+        'base_url'        => env('NETSUITE_BASE_URL'),
+        'consumer_key'    => env('NETSUITE_CONSUMER_KEY'),
+        'consumer_secret' => env('NETSUITE_CONSUMER_SECRET'),
+        'token_key'       => env('NETSUITE_TOKEN_KEY'),
+        'token_secret'    => env('NETSUITE_TOKEN_SECRET'),
+        'script_payment'  => env('NETSUITE_SCRIPT_ID_PAYMENT'),
+    ],
+
 ];
